@@ -1,0 +1,23 @@
+# 依存パッケージ
+node_modules/
+
+# 環境変数
+.env
+
+# 出力ディレクトリ
+slack_thread/
+output/
+
+# OS生成ファイル
+.DS_Store
+Thumbs.db
+
+# ログ
+*.log
+npm-debug.log*
+
+# エディタ設定
+.vscode/
+.idea/
+*.swp
+*.swo
