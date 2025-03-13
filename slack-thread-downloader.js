@@ -204,7 +204,7 @@ async function createZipArchive(sourceDir, zipFilename) {
 // このスクリプトを直接実行する場合
 if (require.main === module) {
   const slackUrl = process.argv[2];
-  const outputDir = process.argv[3] || './slack_thread';
+  const outputDir = process.argv[3] || '~/Downloads/slack_thread';
   
   if (!slackUrl) {
     console.error('最初の引数としてSlack URLを指定してください');
