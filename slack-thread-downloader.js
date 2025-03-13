@@ -46,7 +46,7 @@ async function downloadImage(url, outputPath, token) {
 }
 
 // スレッドメッセージを取得してローカルに保存するメイン関数
-async function saveSlackThread(slackUrl, outputDir = './slack_thread') {
+async function saveSlackThread(slackUrl, outputDir = '~/Downloads/slack_thread') {
   // SlackのAPIトークンを.envから取得
   const token = process.env.SLACK_TOKEN;
   

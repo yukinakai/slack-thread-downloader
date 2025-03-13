@@ -75,7 +75,7 @@ node slack-thread-downloader.js https://workspace.slack.com/archives/C04PPCC3X70
 ### 引数
 
 - `SLACK_THREAD_URL`: 必須。ダウンロードしたいSlackスレッドのURL
-- `OUTPUT_DIRECTORY`: オプション。保存先ディレクトリ（デフォルト: `./slack_thread`）
+- `OUTPUT_DIRECTORY`: オプション。保存先ディレクトリ（デフォルト: `~/Downloads/slack_thread`）
 
 ## 出力
 
