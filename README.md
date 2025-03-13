@@ -5,8 +5,11 @@ Slackの特定のスレッドの会話と添付画像を取得し、ローカル
 ## 機能
 
 - Slack URLからスレッドの会話を取得
-- スレッド内の全メッセージをテキストファイルで保存
+- スレッド内の全メッセージをMarkdown形式で保存
 - スレッド内のすべての画像を自動ダウンロード
+- Markdownファイル内に画像へのリンクを自動挿入
+- スレッドIDごとにデータを整理
+- 会話と画像をZIPアーカイブとして保存
 - 生データをJSON形式で保存（詳細分析用）
 
 ## 必要条件
@@ -66,7 +69,7 @@ node slack-thread-downloader.js [SLACK_THREAD_URL] [OUTPUT_DIRECTORY]
 例:
 
 ```bash
-node slack-thread-downloader.js https://workspace.slack.com/archives/C04PPCC3X70/p1741754154975769 ./my_thread
+node slack-thread-downloader.js https://workspace.slack.com/archives/C04PPCC3X70/p1741754154975769 ./slack_thread
 ```
 
 ### 引数
@@ -76,11 +79,55 @@ node slack-thread-downloader.js https://workspace.slack.com/archives/C04PPCC3X70
 
 ## 出力
 
-スクリプトは指定された出力ディレクトリに以下のファイルを生成します:
+スクリプトは指定された出力ディレクトリに以下の構造でファイルを生成します:
 
-- `conversation.txt`: 読みやすい形式の会話テキスト
-- `raw_data.json`: APIから取得した生データ（JSON形式）
-- `images/`: スレッド内の画像ファイル
+```
+slack_thread/
+├── [スレッドID]/
+│   ├── conversation.md     # Markdown形式の会話テキスト（画像へのリンク付き）
+│   ├── raw_data.json       # APIから取得した生データ（JSON形式）
+│   ├── [スレッドID]_archive.zip  # 会話と画像をまとめたZIPアーカイブ
+│   └── images/             # ダウンロードした画像ファイル
+│       ├── image_1.jpg
+│       ├── image_2.png
+│       └── ...
+```
+
+## 詳細情報
+
+### conversation.mdの形式
+
+会話は以下のようなMarkdown形式で保存されます:
+
+```markdown
+# Slack スレッド会話
+
+## 会話内容
+
+### 2025-03-13 01:45:23 - U12345678
+
+こんにちは！
+
+#### 添付画像
+
+- [photo.jpg](images/image_1.jpg)
+![photo.jpg](images/image_1.jpg)
+
+---
+
+### 2025-03-13 01:46:05 - U87654321
+
+お返事です！
+
+---
+```
+
+### ZIPアーカイブ
+
+各スレッドフォルダ内に`[スレッドID]_archive.zip`という名前でZIPファイルが生成されます。このZIPファイルには以下が含まれます:
+
+- `conversation.md`: Markdown形式の会話
+- `images/`: ダウンロードした全画像
 
 ## ライセンス
 
@@ -90,3 +137,4 @@ MIT
 
 - プライベートチャンネルやDMを取得するには、適切なスコープとアクセス権が必要です
 - Slack APIのレート制限に注意してください
+- 非常に大量の画像がある場合は、ダウンロードに時間がかかることがあります
