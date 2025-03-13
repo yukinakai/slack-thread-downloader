@@ -3,6 +3,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const { WebClient } = require('@slack/web-api');
+const AdmZip = require('adm-zip');
 
 // SlackのURLからチャンネルIDとスレッドタイムスタンプを抽出する関数
 function parseSlackUrl(url) {
@@ -16,7 +17,10 @@ function parseSlackUrl(url) {
     // タイムスタンプ形式を変換 (p1741754154975769 -> 1741754154.975769)
     const threadTs = `${rawTimestamp.slice(0, -6)}.${rawTimestamp.slice(-6)}`;
     
-    return { channelId, threadTs };
+    // スレッドIDとしてタイムスタンプの数値部分を使用
+    const threadId = rawTimestamp;
+    
+    return { channelId, threadTs, threadId };
   }
   
   throw new Error('無効なSlack URL形式です');
@@ -52,28 +56,24 @@ async function saveSlackThread(slackUrl, outputDir = './slack_thread') {
   
   const slack = new WebClient(token);
   
-  // 出力ディレクトリが存在しない場合は作成
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
-  }
-  
-  const imagesDir = path.join(outputDir, 'images');
-  if (!fs.existsSync(imagesDir)) {
-    fs.mkdirSync(imagesDir, { recursive: true });
-  }
-  
   try {
     // SlackのURLを解析
-    const { channelId, threadTs } = parseSlackUrl(slackUrl);
+    const { channelId, threadTs, threadId } = parseSlackUrl(slackUrl);
     console.log(`チャンネルID: ${channelId}, スレッドタイムスタンプ: ${threadTs} を処理中...`);
     
-    // 親メッセージを取得
-    const parentMessage = await slack.conversations.history({
-      channel: channelId,
-      latest: threadTs,
-      limit: 1,
-      inclusive: true
-    });
+    // スレッドIDごとのフォルダを作成
+    const threadDir = path.join(outputDir, threadId);
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+    if (!fs.existsSync(threadDir)) {
+      fs.mkdirSync(threadDir, { recursive: true });
+    }
+    
+    const imagesDir = path.join(threadDir, 'images');
+    if (!fs.existsSync(imagesDir)) {
+      fs.mkdirSync(imagesDir, { recursive: true });
+    }
     
     // スレッド返信を取得
     const threadReplies = await slack.conversations.replies({
@@ -81,36 +81,38 @@ async function saveSlackThread(slackUrl, outputDir = './slack_thread') {
       ts: threadTs
     });
     
-    // 親メッセージと返信を結合
+    // 全メッセージ
     const allMessages = threadReplies.messages;
     console.log(`合計 ${allMessages.length} メッセージを取得しました`);
     
     // 会話内容をJSONとして保存（詳細データ）
     fs.writeFileSync(
-      path.join(outputDir, 'raw_data.json'), 
+      path.join(threadDir, 'raw_data.json'), 
       JSON.stringify(allMessages, null, 2)
     );
     
-    // 会話をテキストファイルに保存（読みやすい形式）
-    const conversationText = allMessages.map(msg => {
-      const timestamp = new Date(Number(msg.ts) * 1000).toISOString();
-      return `[${timestamp}] ${msg.user}: ${msg.text}`;
-    }).join('\n\n');
-    
-    fs.writeFileSync(path.join(outputDir, 'conversation.txt'), conversationText);
-    
-    // ダウンロードした画像を追跡
-    const imagePromises = [];
+    // 画像情報を追跡するためのマップ
+    const imageMap = new Map();
     let imageCounter = 1;
     
     // 画像をダウンロード
+    const imagePromises = [];
     for (const msg of allMessages) {
       if (msg.files && msg.files.length > 0) {
+        if (!msg.imageFiles) msg.imageFiles = [];
+        
         for (const file of msg.files) {
           if (file.mimetype && file.mimetype.startsWith('image/')) {
             const imageUrl = file.url_private;
             const extension = file.mimetype.split('/')[1];
-            const imagePath = path.join(imagesDir, `image_${imageCounter}.${extension}`);
+            const imageName = `image_${imageCounter}.${extension}`;
+            const imagePath = path.join(imagesDir, imageName);
+            
+            msg.imageFiles.push({
+              name: imageName,
+              path: `images/${imageName}`,
+              originalName: file.name
+            });
             
             imagePromises.push(
               downloadImage(imageUrl, imagePath, token)
@@ -126,11 +128,75 @@ async function saveSlackThread(slackUrl, outputDir = './slack_thread') {
     
     await Promise.all(imagePromises);
     
-    console.log(`スレッドが ${outputDir} に正常に保存されました`);
-    return { success: true, outputDir };
+    // 会話をMarkdownファイルに保存（読みやすい形式）
+    const markdownContent = generateMarkdown(allMessages);
+    fs.writeFileSync(path.join(threadDir, 'conversation.md'), markdownContent);
+    
+    // Zipファイルを作成
+    await createZipArchive(threadDir, `${threadId}_archive.zip`);
+    
+    console.log(`スレッドが ${threadDir} に正常に保存されました`);
+    console.log(`Zipアーカイブが ${path.join(threadDir, threadId + '_archive.zip')} に作成されました`);
+    
+    return { success: true, outputDir: threadDir };
     
   } catch (error) {
     console.error('Slackスレッド保存エラー:', error);
+    throw error;
+  }
+}
+
+// Markdownコンテンツを生成する関数
+function generateMarkdown(messages) {
+  let markdown = `# Slack スレッド会話\n\n`;
+  
+  markdown += `## 会話内容\n\n`;
+  
+  for (const msg of messages) {
+    const timestamp = new Date(Number(msg.ts) * 1000).toISOString();
+    const formattedDate = timestamp.replace('T', ' ').slice(0, 19);
+    
+    markdown += `### ${formattedDate} - ${msg.user}\n\n`;
+    markdown += `${msg.text || '(テキストなし)'}\n\n`;
+    
+    // 画像がある場合はリンクを追加
+    if (msg.imageFiles && msg.imageFiles.length > 0) {
+      markdown += `#### 添付画像\n\n`;
+      
+      for (const image of msg.imageFiles) {
+        markdown += `- [${image.originalName}](${image.path})\n`;
+        markdown += `![${image.originalName}](${image.path})\n\n`;
+      }
+    }
+    
+    markdown += `---\n\n`;
+  }
+  
+  return markdown;
+}
+
+// Zipアーカイブを作成する関数
+async function createZipArchive(sourceDir, zipFilename) {
+  try {
+    const zip = new AdmZip();
+    
+    // conversation.mdを追加
+    const mdPath = path.join(sourceDir, 'conversation.md');
+    if (fs.existsSync(mdPath)) {
+      zip.addLocalFile(mdPath);
+    }
+    
+    // imagesフォルダを追加
+    const imagesDir = path.join(sourceDir, 'images');
+    if (fs.existsSync(imagesDir)) {
+      zip.addLocalFolder(imagesDir, 'images');
+    }
+    
+    // Zipファイルを保存
+    zip.writeZip(path.join(sourceDir, zipFilename));
+    return true;
+  } catch (error) {
+    console.error('Zipアーカイブ作成エラー:', error);
     throw error;
   }
 }
